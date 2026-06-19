@@ -15,7 +15,7 @@ import { Tooltip } from "./Tooltip";
 export const ConnectionManager: Component = () => {
   const [activeTab, setActiveTab] = createSignal<"tunneling" | "router" | "knxnetipserver" | "tpuart" | "usb">("tunneling");
   const [scanning, setScanning] = createSignal(false);
-  const [gatewayUrl, setGatewayUrl] = createSignal("");
+  const [gatewayUrl, setGatewayUrl] = createSignal(localStorage.getItem("wsURL") ?? "");
   const [showGatewayConfig, setShowGatewayConfig] = createSignal(false);
 
   let terminalEndRef: HTMLDivElement | undefined;
@@ -242,10 +242,12 @@ export const ConnectionManager: Component = () => {
             <label class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Dirección WebSocket de la Pasarela</label>
             <input
               type="text"
-              value={gatewayUrl()}
-              onInput={(e) => setGatewayUrl(e.currentTarget.value)}
+              value={localStorage.getItem("wsURL") ?? gatewayUrl()}
+              onInput={(e) => {
+                localStorage.setItem("wsURL", e.currentTarget.value);
+                setGatewayUrl(e.currentTarget.value);
+              }}
               class="bg-white border border-slate-200 rounded-lg p-2 text-xs focus:ring-2 focus:ring-(--blue-500)/20 outline-none"
-              placeholder="ws://localhost:8080"
               required
             />
           </div>

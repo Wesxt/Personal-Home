@@ -1,5 +1,6 @@
 import type { Component } from "solid-js";
 import { Logo } from "../assets/Logo";
+import { currentRoute, setCurrentRoute } from "../store/uiStore";
 
 export const SideBar: Component = () => {
   return (
@@ -14,23 +15,36 @@ export const SideBar: Component = () => {
       <nav class="flex flex-col gap-3 my-auto w-full">
         {/* Active connection page */}
         <a
-          href="/"
-          class="flex items-center gap-3 px-4 py-3 rounded-xl text-xs font-bold transition-all to-white border border-[var(--blue-100)] text-[var(--blue-700)] shadow-sm hover:text-[var(--blue-600)]"
+          href="#"
+          onClick={(e) => { e.preventDefault(); setCurrentRoute("connection"); }}
+          class={`flex items-center gap-3 px-4 py-3 rounded-xl text-xs font-bold transition-all ${
+            currentRoute() === "connection"
+              ? "bg-white border border-(--blue-100) text-(--blue-700) shadow-sm hover:text-(--blue-600)"
+              : "text-slate-500 hover:text-slate-700 hover:bg-slate-50/80 border border-transparent"
+          }`}
         >
-          <span class="text-base">🔌</span>
+          <span class={`text-base ${currentRoute() === "connection" ? "" : "opacity-70 grayscale"}`}>🔌</span>
           <span>Conexión Bus</span>
-          <span class="ml-auto h-2 w-2 rounded-full bg-[var(--blue-500)] shadow-[0_0_8px_rgba(59,130,246,0.6)]"></span>
+          {currentRoute() === "connection" && (
+            <span class="ml-auto h-2 w-2 rounded-full bg-(--blue-500) shadow-[0_0_8px_rgba(59,130,246,0.6)] animate-pulse"></span>
+          )}
         </a>
 
-        {/* Coming soon pages */}
+        {/* Group Addresses page */}
         <a
           href="#"
-          onClick={(e) => { e.preventDefault(); alert("Direcciones de Grupo estará disponible próximamente."); }}
-          class="flex items-center gap-3 px-4 py-3 rounded-xl text-xs font-bold transition-all text-slate-400 hover:text-slate-600 hover:bg-slate-50"
+          onClick={(e) => { e.preventDefault(); setCurrentRoute("group_addresses"); }}
+          class={`flex items-center gap-3 px-4 py-3 rounded-xl text-xs font-bold transition-all ${
+            currentRoute() === "group_addresses"
+              ? "bg-white border border-(--blue-100) text-(--blue-700) shadow-sm hover:text-(--blue-600)"
+              : "text-slate-500 hover:text-slate-700 hover:bg-slate-50/80 border border-transparent"
+          }`}
         >
-          <span class="text-base text-slate-300">📁</span>
+          <span class={`text-base ${currentRoute() === "group_addresses" ? "" : "opacity-70 grayscale"}`}>📁</span>
           <span>Direcciones Grupo</span>
-          <span class="ml-auto text-[9px] font-bold text-slate-400 bg-slate-100 py-0.5 px-1.5 rounded">PRONTO</span>
+          {currentRoute() === "group_addresses" && (
+            <span class="ml-auto h-2 w-2 rounded-full bg-(--blue-500) shadow-[0_0_8px_rgba(59,130,246,0.6)] animate-pulse"></span>
+          )}
         </a>
 
         <a
