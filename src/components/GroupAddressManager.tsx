@@ -283,8 +283,8 @@ export const GroupAddressManager: Component = () => {
   };
 
   return (
-    <div class="space-y-6 p-4 max-w-7xl">
-      <header class="flex flex-col justify-between items-start gap-2 bg-white/40 border border-slate-200/80 rounded-2xl p-5 backdrop-blur-md shadow-sm">
+    <div class="space-y-6 p-4 w-auto">
+      <header class="flex flex-col justify-between items-start gap-2 bg-white border border-slate-200/80 rounded-2xl p-5 shadow-sm">
         <h2 class="text-xl font-bold tracking-tight text-slate-900 flex items-center gap-2">
           📡 Gestión de Direcciones de Grupo
         </h2>
@@ -296,7 +296,7 @@ export const GroupAddressManager: Component = () => {
       <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* ADD SUBSCRIPTION FORM */}
         <div class="lg:col-span-3 space-y-6">
-          <div class="bg-white/80 border border-slate-200/80 rounded-2xl p-6 shadow-sm backdrop-blur-md">
+          <div class="bg-white border border-slate-200/80 rounded-2xl p-6 shadow-sm">
             <h3 class="text-sm font-bold text-slate-700 mb-4 border-b pb-2">Añadir Dirección de Grupo</h3>
             <form onSubmit={handleSubscribe} class="space-y-4">
               <div class="flex flex-col gap-1.5">
@@ -503,6 +503,7 @@ export const GroupAddressManager: Component = () => {
                         />
                       </th>
                       <th class="py-3 px-4">Dirección Grupo</th>
+                      <th class="py-3 px-4">Nombre</th>
                       <th class="py-3 px-4">DPT</th>
                       <th class="py-3 px-4">Último Valor</th>
                       <th class="py-3 px-4">Origen (Físico)</th>
@@ -584,6 +585,13 @@ export const GroupAddressManager: Component = () => {
                                 <span class="bg-(--blue-50) text-(--blue-700) font-mono font-bold px-2 py-0.5 rounded-md border border-(--blue-100) w-max">
                                   {ga}
                                 </span>
+
+                              </div>
+                            </td>
+                            {/* Name */}
+
+                            <td class="py-3.5 px-4 text-sm text-slate-800">
+                              <div class="flex flex-col gap-1 align-middle">
                                 <Show when={groupNames[ga]}>
                                   <span class="text-xs text-slate-700 font-bold block leading-tight">{groupNames[ga]}</span>
                                 </Show>
@@ -592,7 +600,6 @@ export const GroupAddressManager: Component = () => {
                                 </Show>
                               </div>
                             </td>
-
                             {/* DPT Column */}
                             <td class="py-3.5 px-4">
                               <select
@@ -600,7 +607,7 @@ export const GroupAddressManager: Component = () => {
                                 onChange={(e) => {
                                   configDpt(ga, e.currentTarget.value);
                                 }}
-                                class="text-[10px] font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded px-1.5 py-0.5 outline-none cursor-pointer focus:ring-1 focus:ring-(--blue-500)/50 transition-all uppercase font-mono"
+                                class="text-[10px] w-25 font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded px-1.5 py-0.5 outline-none cursor-pointer focus:ring-1 focus:ring-(--blue-500)/50 transition-all uppercase font-mono"
                               >
                                 <For each={DPT_OPTIONS}>
                                   {(opt) => (
@@ -1259,7 +1266,7 @@ export const GroupAddressManager: Component = () => {
             <p class="text-sm text-slate-500 mb-6 leading-relaxed">
               Esta acción eliminará de forma permanente las <b class="text-rose-600">{subscriptions().length}</b> direcciones de grupo de tu base de datos y de la memoria. Esta acción no se puede deshacer.
             </p>
-            
+
             <div class="flex gap-3 w-full">
               <button
                 onClick={() => setShowDeleteAllModal(false)}
