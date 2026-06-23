@@ -4,7 +4,7 @@ import { currentRoute, setCurrentRoute } from "../store/uiStore";
 
 export const SideBar: Component = () => {
   return (
-    <aside class="w-64 pr-5 pl-5 border-r border-slate-200/80 bg-white/60 backdrop-blur-md relative flex flex-col justify-between py-8">
+    <aside class="w-64 pr-5 pl-5 border-r border-slate-200/80 bg-white relative flex flex-col justify-start items-center py-8">
       {/* Top Section with Logo */}
       <div class="flex flex-col items-center gap-2 mt-4">
         <Logo></Logo>
@@ -12,16 +12,15 @@ export const SideBar: Component = () => {
       </div>
 
       {/* Main Navigation */}
-      <nav class="flex flex-col gap-3 my-auto w-full">
+      <nav class="flex flex-col gap-3 mt-75 w-full">
         {/* Active connection page */}
         <a
           href="#"
           onClick={(e) => { e.preventDefault(); setCurrentRoute("connection"); }}
-          class={`flex items-center gap-3 px-4 py-3 rounded-xl text-xs font-bold transition-all ${
-            currentRoute() === "connection"
-              ? "bg-white border border-(--blue-100) text-(--blue-700) shadow-sm hover:text-(--blue-600)"
-              : "text-slate-500 hover:text-slate-700 hover:bg-slate-50/80 border border-transparent"
-          }`}
+          class={`flex items-center gap-3 px-4 py-3 rounded-xl text-xs font-bold transition-all ${currentRoute() === "connection"
+            ? "bg-white border border-(--blue-100) text-(--blue-700) shadow-sm hover:text-(--blue-600)"
+            : "text-slate-500 hover:text-slate-700 hover:bg-slate-50/80 border border-transparent"
+            }`}
         >
           <span class={`text-base ${currentRoute() === "connection" ? "" : "opacity-70 grayscale"}`}>🔌</span>
           <span>Conexión Bus</span>
@@ -34,11 +33,10 @@ export const SideBar: Component = () => {
         <a
           href="#"
           onClick={(e) => { e.preventDefault(); setCurrentRoute("group_addresses"); }}
-          class={`flex items-center gap-3 px-4 py-3 rounded-xl text-xs font-bold transition-all ${
-            currentRoute() === "group_addresses"
-              ? "bg-white border border-(--blue-100) text-(--blue-700) shadow-sm hover:text-(--blue-600)"
-              : "text-slate-500 hover:text-slate-700 hover:bg-slate-50/80 border border-transparent"
-          }`}
+          class={`flex items-center gap-3 px-4 py-3 rounded-xl text-xs font-bold transition-all ${currentRoute() === "group_addresses"
+            ? "bg-white border border-(--blue-100) text-(--blue-700) shadow-sm hover:text-(--blue-600)"
+            : "text-slate-500 hover:text-slate-700 hover:bg-slate-50/80 border border-transparent"
+            }`}
         >
           <span class={`text-base ${currentRoute() === "group_addresses" ? "" : "opacity-70 grayscale"}`}>📁</span>
           <span>Direcciones Grupo</span>

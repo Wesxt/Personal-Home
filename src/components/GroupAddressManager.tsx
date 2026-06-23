@@ -1,4 +1,4 @@
-import { type Component, createSignal, For, Show, Switch, Match } from "solid-js";
+import { type Component, createSignal, For, Show, Switch, Match, createEffect } from "solid-js";
 import {
   knxStatus,
   subscriptions,
@@ -10,6 +10,13 @@ import {
   configDpt,
   readKnx,
   writeKnx,
+  parsingProject,
+  parsedProject,
+  groupNames,
+  groupDescriptions,
+  parseKnxProj,
+  importGroupAddresses,
+  setParsedProject,
 } from "../store/knxStore";
 import { Tooltip } from "./Tooltip";
 
@@ -48,6 +55,199 @@ const getDptCategory = (dptStr: string): string => {
 export const GroupAddressManager: Component = () => {
   const [gaInput, setGaInput] = createSignal("");
   const [dptInput, setDptInput] = createSignal("DPT1.001");
+  const [nameInput, setNameInput] = createSignal("");
+  const [projectPassword, setProjectPassword] = createSignal("");
+  const [selectedGas, setSelectedGas] = createSignal<Record<string, boolean>>({});
+  const [searchTerm, setSearchTerm] = createSignal("");
+  const [dptFilter, setDptFilter] = createSignal("ALL");
+
+  // State for Active Subscriptions table
+  const [activeSearchTerm, setActiveSearchTerm] = createSignal("");
+  const [activeDptFilter, setActiveDptFilter] = createSignal("ALL");
+  const [activePage, setActivePage] = createSignal(1);
+  const [itemsPerPage, setItemsPerPage] = createSignal(10);
+  const [activeSelectedGas, setActiveSelectedGas] = createSignal<Record<string, boolean>>({});
+  const [bulkDptInput, setBulkDptInput] = createSignal("DPT1.001");
+  const [showDeleteAllModal, setShowDeleteAllModal] = createSignal(false);
+  const [deleteAllCountdown, setDeleteAllCountdown] = createSignal(0);
+
+  // Reset pagination when active filters change
+  createEffect(() => {
+    activeSearchTerm();
+    activeDptFilter();
+    itemsPerPage();
+    setActivePage(1);
+  });
+
+  const matchWildcard = (target: string, term: string) => {
+    if (!target) return false;
+    target = target.toLowerCase();
+    if (term.includes('*')) {
+      try {
+        const regexStr = term.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
+        return new RegExp(regexStr, 'i').test(target);
+      } catch {
+        return target.includes(term);
+      }
+    }
+    return target.includes(term);
+  };
+
+  const filteredActiveGas = () => {
+    const term = activeSearchTerm().toLowerCase().trim();
+    const dptF = activeDptFilter();
+    return subscriptions().filter(ga => {
+      const dpt = dpts[ga] || "";
+      if (dptF !== "ALL" && dptF !== "NONE" && dpt !== dptF) return false;
+      if (dptF === "NONE" && dpt) return false;
+      if (!term) return true;
+      const name = groupNames[ga] || "";
+      const desc = groupDescriptions[ga] || "";
+      return matchWildcard(ga, term) || matchWildcard(name, term) || matchWildcard(desc, term);
+    });
+  };
+
+  const paginatedActiveGas = () => {
+    const start = (activePage() - 1) * itemsPerPage();
+    return filteredActiveGas().slice(start, start + itemsPerPage());
+  };
+
+  const totalPages = () => Math.max(1, Math.ceil(filteredActiveGas().length / itemsPerPage()));
+
+  const handleBulkDelete = () => {
+    const selected = Object.keys(activeSelectedGas()).filter(ga => activeSelectedGas()[ga]);
+    if (selected.length === 0) return;
+    if (!confirm(`¿Eliminar ${selected.length} suscripciones?`)) return;
+    selected.forEach(ga => unsubscribeKnx(ga));
+    setActiveSelectedGas({});
+  };
+
+  const handleBulkChangeDpt = () => {
+    const selected = Object.keys(activeSelectedGas()).filter(ga => activeSelectedGas()[ga]);
+    if (selected.length === 0) return;
+    const dptToApply = bulkDptInput();
+    selected.forEach(ga => configDpt(ga, dptToApply));
+    // Optional: we keep selection as per plan or user choice. We'll unselect them to avoid confusion, or let's keep them selected as stated in the plan but give an alert.
+    // Actually, deselecting is cleaner after applying a bulk edit in many UX patterns, but I'll follow my plan to keep it simple or just deselect them for safety.
+    setActiveSelectedGas({});
+  };
+
+  const handleDeleteAllClick = () => {
+    setShowDeleteAllModal(true);
+    setDeleteAllCountdown(6);
+    const interval = setInterval(() => {
+      setDeleteAllCountdown((prev) => {
+        if (prev <= 1) {
+          clearInterval(interval);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  };
+
+  const executeDeleteAll = () => {
+    if (deleteAllCountdown() > 0) return;
+    subscriptions().forEach(ga => unsubscribeKnx(ga));
+    setShowDeleteAllModal(false);
+  };
+
+  const isAllOnPageSelected = () => {
+    const pageGas = paginatedActiveGas();
+    return pageGas.length > 0 && pageGas.every(ga => activeSelectedGas()[ga]);
+  };
+
+  const handleSelectAllOnPage = (e: Event) => {
+    const checked = (e.currentTarget as HTMLInputElement).checked;
+    const updated = { ...activeSelectedGas() };
+    paginatedActiveGas().forEach(ga => {
+      updated[ga] = checked;
+    });
+    setActiveSelectedGas(updated);
+  };
+
+  createEffect(() => {
+    const proj = parsedProject();
+    if (proj && proj.group_addresses) {
+      const initial: Record<string, boolean> = {};
+      proj.group_addresses.forEach((ga: any) => {
+        if (!subscriptions().includes(ga.address)) {
+          initial[ga.address] = true;
+        }
+      });
+      setSelectedGas(initial);
+    }
+  });
+
+  const filteredGas = () => {
+    const proj = parsedProject();
+    if (!proj || !proj.group_addresses) return [];
+    const term = searchTerm().toLowerCase().trim();
+    const dpt = dptFilter();
+
+    return proj.group_addresses.filter((ga: any) => {
+      if (dpt === "NONE" && ga.dpt) return false;
+      if (dpt !== "ALL" && dpt !== "NONE" && ga.dpt !== dpt) return false;
+      if (!term) return true;
+      return matchWildcard(ga.address, term) || matchWildcard(ga.name, term) || matchWildcard(ga.description || "", term);
+    });
+  };
+
+  const getLinkedDevicesStr = (ga: any) => {
+    const proj = parsedProject();
+    if (!proj) return "—";
+    const ids = ga.communication_object_ids || [];
+    if (ids.length === 0) return "—";
+    const names = ids.map((id: string) => {
+      const co = proj.communication_objects?.[id];
+      if (!co) return null;
+      const dev = proj.devices?.[co.device_address];
+      const devName = dev ? `${dev.name} (${co.device_address})` : co.device_address;
+      return `${devName} - ${co.name || co.text || "Objeto"}`;
+    }).filter(Boolean);
+    return names.length > 0 ? names.join(", ") : "—";
+  };
+
+  const handleFileUpload = (e: Event) => {
+    const input = e.target as HTMLInputElement;
+    if (!input.files || input.files.length === 0) return;
+
+    const file = input.files[0];
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      const base64Data = result.split(",")[1] || result;
+      parseKnxProj(base64Data, projectPassword() || undefined);
+      setProjectPassword("");
+      input.value = "";
+    };
+    reader.onerror = () => {
+      alert("Error al leer el archivo.");
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleImport = () => {
+    const proj = parsedProject();
+    if (!proj) return;
+    const selected = Object.keys(selectedGas()).filter(addr => selectedGas()[addr]);
+    if (selected.length === 0) {
+      alert("Selecciona al menos una dirección de grupo para importar.");
+      return;
+    }
+
+    const payloadGas = proj.group_addresses
+      .filter((ga: any) => selected.includes(ga.address))
+      .map((ga: any) => ({
+        address: ga.address,
+        dpt: ga.dpt || null,
+        name: ga.name || null,
+        description: ga.description || null
+      }));
+
+    importGroupAddresses(payloadGas);
+    setParsedProject(null);
+  };
 
   const handleSubscribe = (e: Event) => {
     e.preventDefault();
@@ -57,13 +257,20 @@ export const GroupAddressManager: Component = () => {
     }
     const ga = gaInput().trim();
     const dpt = dptInput().trim();
+    const name = nameInput().trim();
 
     if (ga) {
+      if (subscriptions().includes(ga)) {
+        alert("La dirección de grupo ya se encuentra suscrita.");
+        return;
+      }
+
       if (dpt) {
         configDpt(ga, dpt);
       }
-      subscribeKnx(ga);
+      subscribeKnx(ga, name || undefined);
       setGaInput("");
+      setNameInput("");
     }
   };
 
@@ -76,7 +283,7 @@ export const GroupAddressManager: Component = () => {
   };
 
   return (
-    <div class="space-y-6 p-4 max-w-7xl mx-6 mt-6">
+    <div class="space-y-6 p-4 max-w-7xl">
       <header class="flex flex-col justify-between items-start gap-2 bg-white/40 border border-slate-200/80 rounded-2xl p-5 backdrop-blur-md shadow-sm">
         <h2 class="text-xl font-bold tracking-tight text-slate-900 flex items-center gap-2">
           📡 Gestión de Direcciones de Grupo
@@ -104,6 +311,19 @@ export const GroupAddressManager: Component = () => {
                   onInput={(e) => setGaInput(e.currentTarget.value)}
                   class="border border-slate-200 rounded-lg p-2 text-sm focus:ring-2 focus:ring-(--blue-500)/20 outline-none bg-white text-slate-800"
                   placeholder="1/1/1"
+                  disabled={!knxStatus().connected}
+                />
+              </div>
+              <div class="flex flex-col gap-1.5">
+                <label class="text-xs font-bold text-slate-600 flex items-center">
+                  Nombre (Opcional)
+                </label>
+                <input
+                  type="text"
+                  value={nameInput()}
+                  onInput={(e) => setNameInput(e.currentTarget.value)}
+                  class="border border-slate-200 rounded-lg p-2 text-sm focus:ring-2 focus:ring-(--blue-500)/20 outline-none bg-white text-slate-800"
+                  placeholder="Ej: Luz Principal"
                   disabled={!knxStatus().connected}
                 />
               </div>
@@ -137,16 +357,71 @@ export const GroupAddressManager: Component = () => {
               </button>
             </form>
           </div>
+
+          {/* IMPORT PROJECT CARD */}
+          <div class="bg-white/80 border border-slate-200/80 rounded-2xl p-6 shadow-sm backdrop-blur-md">
+            <h3 class="text-sm font-bold text-slate-700 mb-4 border-b pb-2 flex items-center gap-1.5">
+              📁 Importar Proyecto KNX
+            </h3>
+            <div class="space-y-4">
+              <p class="text-[10px] text-slate-500 leading-normal">
+                Sube un archivo de exportación ETS (<code>.knxproj</code>) para importar tus direcciones de grupo y DPTs automáticamente.
+              </p>
+
+              <div class="flex flex-col gap-1.5">
+                <label class="text-xs font-bold text-slate-600">Contraseña (opcional)</label>
+                <input
+                  type="password"
+                  placeholder="Si está cifrado..."
+                  class="border border-slate-200 rounded-lg p-2 text-xs outline-none bg-white text-slate-800"
+                  value={projectPassword()}
+                  onInput={(e) => setProjectPassword(e.currentTarget.value)}
+                />
+              </div>
+
+              <div class="relative border-2 border-dashed border-slate-200 rounded-xl hover:border-(--blue-400) transition-colors p-4 flex flex-col items-center justify-center cursor-pointer bg-slate-50/50">
+                <input
+                  type="file"
+                  accept=".knxproj"
+                  class="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                  onChange={handleFileUpload}
+                  disabled={parsingProject()}
+                />
+                <Show when={parsingProject()} fallback={
+                  <div class="text-center">
+                    <span class="text-2xl block mb-1">📁</span>
+                    <span class="text-xs font-bold text-slate-600 block">Subir .knxproj</span>
+                    <span class="text-[9px] text-slate-400 block mt-0.5">Click o arrastra</span>
+                  </div>
+                }>
+                  <div class="text-center">
+                    <span class="inline-block animate-spin text-xl mb-1">⏳</span>
+                    <span class="text-xs font-bold text-slate-600 block">Procesando...</span>
+                  </div>
+                </Show>
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* ACTIVE SUBSCRIPTIONS */}
         <div class="lg:col-span-9">
-          <div class="bg-white/80 border border-slate-200/80 rounded-2xl p-6 shadow-sm min-h-75 w-max">
+          <div class="bg-white border border-slate-200/80 rounded-2xl p-6 shadow-sm min-h-75 w-auto">
             <h3 class="text-sm font-bold text-slate-700 mb-4 border-b pb-2 flex justify-between items-center">
               <span>Suscripciones Activas</span>
-              <span class="bg-slate-100 text-slate-600 text-[10px] px-2 py-0.5 rounded-full border border-slate-200">
-                {subscriptions().length} total
-              </span>
+              <div class="flex items-center gap-3">
+                <span class="bg-slate-100 text-slate-600 text-[10px] px-2 py-0.5 rounded-full border border-slate-200">
+                  {subscriptions().length} total
+                </span>
+                <Show when={subscriptions().length > 0}>
+                  <button
+                    onClick={handleDeleteAllClick}
+                    class="bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 px-2.5 py-1 rounded-lg text-[10px] font-bold transition-colors flex items-center gap-1 shadow-sm"
+                  >
+                    🗑️ Eliminar Todo
+                  </button>
+                </Show>
+              </div>
             </h3>
 
             <Show
@@ -159,10 +434,74 @@ export const GroupAddressManager: Component = () => {
                 </div>
               }
             >
-              <div class="overflow-x-auto w-full">
+              {/* Filters for Active Subscriptions */}
+              <div class="flex gap-4 mb-4">
+                <input
+                  type="text"
+                  placeholder="Buscar por dirección, nombre o descripción..."
+                  value={activeSearchTerm()}
+                  onInput={(e) => setActiveSearchTerm(e.currentTarget.value)}
+                  class="flex-1 border border-slate-200 rounded-xl px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-(--blue-500)/20 transition-all bg-white text-slate-800"
+                />
+                <select
+                  value={activeDptFilter()}
+                  onChange={(e) => setActiveDptFilter(e.currentTarget.value)}
+                  class="border border-slate-200 rounded-xl px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-(--blue-500)/20 transition-all bg-white text-slate-700 font-semibold"
+                >
+                  <option value="ALL">Todos los DPTs</option>
+                  <For each={[...new Set(subscriptions().map((ga) => dpts[ga]).filter(Boolean))].sort() as string[]}>
+                    {(dpt) => <option value={dpt}>{dpt}</option>}
+                  </For>
+                  <option value="NONE">Sin DPT configurado</option>
+                </select>
+              </div>
+
+              {/* Bulk Actions Bar */}
+              <Show when={Object.values(activeSelectedGas()).some(Boolean)}>
+                <div class="flex items-center justify-between bg-blue-50 border border-blue-100 rounded-xl p-3 mb-4 animate-scale-in">
+                  <span class="text-xs font-bold text-blue-700">
+                    {Object.values(activeSelectedGas()).filter(Boolean).length} seleccionadas
+                  </span>
+                  <div class="flex items-center gap-3">
+                    <div class="flex items-center gap-1.5 border-r border-blue-200 pr-3">
+                      <select
+                        value={bulkDptInput()}
+                        onChange={(e) => setBulkDptInput(e.currentTarget.value)}
+                        class="text-[10px] bg-white border border-blue-200 rounded px-2 py-1 outline-none text-slate-700 uppercase"
+                      >
+                        <For each={DPT_OPTIONS}>
+                          {(opt) => <option value={opt.value}>{opt.value}</option>}
+                        </For>
+                      </select>
+                      <button
+                        onClick={handleBulkChangeDpt}
+                        class="bg-blue-600 hover:bg-blue-700 text-white px-2.5 py-1 rounded text-[10px] font-bold shadow-sm transition-colors"
+                      >
+                        Aplicar DPT
+                      </button>
+                    </div>
+                    <button
+                      onClick={handleBulkDelete}
+                      class="bg-rose-500 hover:bg-rose-600 text-white px-2.5 py-1 rounded text-[10px] font-bold shadow-sm transition-colors flex items-center gap-1"
+                    >
+                      <span>Eliminar</span>
+                    </button>
+                  </div>
+                </div>
+              </Show>
+
+              <div class="overflow-x-auto w-full border border-slate-100 rounded-xl">
                 <table class="w-full text-left border-collapse">
                   <thead>
-                    <tr class="border-b border-slate-100 text-slate-400 text-[10px] font-bold uppercase tracking-wider">
+                    <tr class="bg-slate-50 border-b border-slate-100 text-slate-400 text-[10px] font-bold uppercase tracking-wider">
+                      <th class="py-3 px-4 w-10 text-center">
+                        <input
+                          type="checkbox"
+                          class="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                          checked={isAllOnPageSelected()}
+                          onChange={handleSelectAllOnPage}
+                        />
+                      </th>
                       <th class="py-3 px-4">Dirección Grupo</th>
                       <th class="py-3 px-4">DPT</th>
                       <th class="py-3 px-4">Último Valor</th>
@@ -171,8 +510,8 @@ export const GroupAddressManager: Component = () => {
                       <th class="py-3 px-4 text-right">Escritura / Acciones</th>
                     </tr>
                   </thead>
-                  <tbody class="divide-y divide-slate-100/60">
-                    <For each={subscriptions()}>
+                  <tbody class="divide-y divide-slate-100/60 text-xs">
+                    <For each={paginatedActiveGas()}>
                       {(ga) => {
                         const currentDpt = () => dpts[ga] || "Desconocido";
 
@@ -225,12 +564,33 @@ export const GroupAddressManager: Component = () => {
                         const [dpt15Index, setDpt15Index] = createSignal(0);
 
                         return (
-                          <tr class="hover:bg-slate-50/40 transition-colors">
+                          <tr class={`hover:bg-slate-50/40 transition-colors ${activeSelectedGas()[ga] ? 'bg-blue-50/30' : ''}`}>
+                            <td class="py-3.5 px-4 text-center">
+                              <input
+                                type="checkbox"
+                                class="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                                checked={!!activeSelectedGas()[ga]}
+                                onChange={(e) => {
+                                  setActiveSelectedGas({
+                                    ...activeSelectedGas(),
+                                    [ga]: e.currentTarget.checked
+                                  });
+                                }}
+                              />
+                            </td>
                             {/* GA Column */}
-                            <td class="py-3.5 px-4 font-mono font-bold text-sm text-(--blue-700)">
-                              <span class="bg-(--blue-50) px-2 py-0.5 rounded-md border border-(--blue-100)">
-                                {ga}
-                              </span>
+                            <td class="py-3.5 px-4 text-sm text-slate-800">
+                              <div class="flex flex-col gap-1 align-middle">
+                                <span class="bg-(--blue-50) text-(--blue-700) font-mono font-bold px-2 py-0.5 rounded-md border border-(--blue-100) w-max">
+                                  {ga}
+                                </span>
+                                <Show when={groupNames[ga]}>
+                                  <span class="text-xs text-slate-700 font-bold block leading-tight">{groupNames[ga]}</span>
+                                </Show>
+                                <Show when={groupDescriptions[ga]}>
+                                  <span class="text-[10px] text-slate-400 font-normal block leading-tight">{groupDescriptions[ga]}</span>
+                                </Show>
+                              </div>
                             </td>
 
                             {/* DPT Column */}
@@ -521,7 +881,7 @@ export const GroupAddressManager: Component = () => {
                                               <h4 class="font-bold text-sm text-slate-800 flex items-center gap-1.5">
                                                 🔑 Configurar DPT 15 - Dirección {ga}
                                               </h4>
-                                              <button 
+                                              <button
                                                 onClick={() => setShowDpt15Modal(false)}
                                                 class="text-slate-400 hover:text-slate-600 font-bold text-xs"
                                               >
@@ -688,13 +1048,240 @@ export const GroupAddressManager: Component = () => {
                         );
                       }}
                     </For>
+                    <Show when={paginatedActiveGas().length === 0}>
+                      <tr>
+                        <td colspan="7" class="py-10 text-center text-slate-400 text-xs">
+                          No se encontraron suscripciones activas que coincidan con los filtros.
+                        </td>
+                      </tr>
+                    </Show>
                   </tbody>
                 </table>
               </div>
+
+              {/* Pagination Footer */}
+              <Show when={filteredActiveGas().length > 0}>
+                <div class="flex items-center justify-between mt-4">
+                  <div class="flex items-center gap-2">
+                    <span class="text-xs text-slate-500 font-medium">Elementos por página:</span>
+                    <select
+                      value={itemsPerPage()}
+                      onChange={(e) => setItemsPerPage(Number(e.currentTarget.value))}
+                      class="border border-slate-200 rounded-lg px-2 py-1 text-xs outline-none focus:ring-2 focus:ring-blue-500/20 bg-white text-slate-700"
+                    >
+                      <option value="10">10</option>
+                      <option value="20">20</option>
+                      <option value="50">50</option>
+                      <option value="100">100</option>
+                    </select>
+                  </div>
+
+                  <div class="flex items-center gap-4">
+                    <span class="text-xs text-slate-500">
+                      Página <span class="font-bold text-slate-700">{activePage()}</span> de <span class="font-bold text-slate-700">{totalPages()}</span>
+                    </span>
+                    <div class="flex items-center gap-1">
+                      <button
+                        disabled={activePage() === 1}
+                        onClick={() => setActivePage(p => Math.max(1, p - 1))}
+                        class="p-1.5 rounded bg-slate-50 border border-slate-200 text-slate-600 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-slate-100 transition-colors"
+                      >
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" /></svg>
+                      </button>
+                      <button
+                        disabled={activePage() === totalPages()}
+                        onClick={() => setActivePage(p => Math.min(totalPages(), p + 1))}
+                        class="p-1.5 rounded bg-slate-50 border border-slate-200 text-slate-600 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-slate-100 transition-colors"
+                      >
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </Show>
             </Show>
           </div>
         </div>
       </div>
+
+      {/* KNX Project Import Modal */}
+      <Show when={parsedProject()}>
+        <div class="fixed inset-0 bg-slate-900/50 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div class="bg-white rounded-3xl shadow-xl border border-slate-100 max-w-4xl w-full max-h-[85vh] flex flex-col p-6 text-left animate-scale-in">
+            <header class="flex justify-between items-center pb-3 border-b border-slate-100 mb-4">
+              <div>
+                <h3 class="font-bold text-base text-slate-800 flex items-center gap-2">
+                  📁 Importar Direcciones de Grupo
+                </h3>
+                <p class="text-xs text-slate-500 mt-1">
+                  Proyecto: <span class="font-semibold text-slate-700">{parsedProject()?.info?.name || "Desconocido"}</span> · Encontradas: <span class="font-semibold text-slate-700">{parsedProject()?.group_addresses?.length || 0}</span> direcciones
+                </p>
+              </div>
+              <button
+                onClick={() => setParsedProject(null)}
+                class="text-slate-400 hover:text-slate-600 font-bold text-xs bg-slate-50 hover:bg-slate-100 rounded-full h-7 w-7 flex items-center justify-center transition-all"
+              >
+                ✕
+              </button>
+            </header>
+
+            {/* Filters bar */}
+            <div class="flex gap-4 mb-4">
+              <input
+                type="text"
+                placeholder="Buscar por dirección, nombre o descripción..."
+                value={searchTerm()}
+                onInput={(e) => setSearchTerm(e.currentTarget.value)}
+                class="flex-1 border border-slate-200 rounded-xl px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-(--blue-500)/20 transition-all bg-white text-slate-800"
+              />
+              <select
+                value={dptFilter()}
+                onChange={(e) => setDptFilter(e.currentTarget.value)}
+                class="border border-slate-200 rounded-xl px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-(--blue-500)/20 transition-all bg-white text-slate-700 font-semibold"
+              >
+                <option value="ALL">Todos los DPTs</option>
+                <For each={[...new Set(parsedProject()?.group_addresses?.map((ga: any) => ga.dpt).filter(Boolean))].sort() as string[]}>
+                  {(dpt) => <option value={dpt}>{dpt}</option>}
+                </For>
+                <option value="NONE">Sin DPT configurado</option>
+              </select>
+            </div>
+
+            {/* List Table */}
+            <div class="flex-1 overflow-y-auto border border-slate-100 rounded-2xl mb-5">
+              <table class="w-full text-left border-collapse">
+                <thead class="sticky top-0 bg-slate-50 border-b border-slate-100 z-10">
+                  <tr class="text-slate-400 text-[10px] font-bold uppercase tracking-wider">
+                    <th class="py-2.5 px-4 w-12 text-center">
+                      <input
+                        type="checkbox"
+                        class="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                        checked={
+                          filteredGas().length > 0 &&
+                          filteredGas().every((ga: any) => selectedGas()[ga.address])
+                        }
+                        onChange={(e) => {
+                          const checked = e.currentTarget.checked;
+                          const updated = { ...selectedGas() };
+                          filteredGas().forEach((ga: any) => {
+                            updated[ga.address] = checked;
+                          });
+                          setSelectedGas(updated);
+                        }}
+                      />
+                    </th>
+                    <th class="py-2.5 px-4 w-28">Dirección</th>
+                    <th class="py-2.5 px-4 w-48">Nombre</th>
+                    <th class="py-2.5 px-4 w-24">DPT</th>
+                    <th class="py-2.5 px-4">Descripción / Dispositivos</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100 text-xs">
+                  <For each={filteredGas()}>
+                    {(ga) => {
+                      const isSubscribed = () => subscriptions().includes(ga.address);
+                      return (
+                        <tr class={`hover:bg-slate-50/50 transition-colors ${isSubscribed() ? "opacity-60 bg-slate-50/20" : ""}`}>
+                          <td class="py-3 px-4 text-center">
+                            <input
+                              type="checkbox"
+                              class="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                              checked={!!selectedGas()[ga.address]}
+                              onChange={(e) => {
+                                setSelectedGas({
+                                  ...selectedGas(),
+                                  [ga.address]: e.currentTarget.checked
+                                });
+                              }}
+                            />
+                          </td>
+                          <td class="py-3 px-4 font-mono font-bold text-(--blue-700)">{ga.address}</td>
+                          <td class="py-3 px-4 font-semibold text-slate-700">{ga.name}</td>
+                          <td class="py-3 px-4">
+                            <span class={`font-mono px-1.5 py-0.5 rounded text-[10px] font-bold ${ga.dpt ? "bg-amber-50 text-amber-800 border border-amber-100" : "bg-slate-50 text-slate-400 border border-slate-100"}`}>
+                              {ga.dpt || "Sin DPT"}
+                            </span>
+                          </td>
+                          <td class="py-3 px-4 text-slate-500">
+                            <div class="flex flex-col gap-0.5">
+                              <span class="block text-slate-600">{ga.description || <span class="italic text-slate-400">Sin descripción</span>}</span>
+                              <span class="block text-[10px] text-slate-400 font-mono">Dispositivos: {getLinkedDevicesStr(ga)}</span>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    }}
+                  </For>
+                  <Show when={filteredGas().length === 0}>
+                    <tr>
+                      <td colspan="5" class="py-10 text-center text-slate-400">
+                        No se encontraron direcciones de grupo que coincidan con los filtros.
+                      </td>
+                    </tr>
+                  </Show>
+                </tbody>
+              </table>
+            </div>
+
+            <footer class="flex justify-between items-center border-t border-slate-100 pt-4">
+              <span class="text-xs text-slate-500">
+                Seleccionadas: <span class="font-bold text-slate-700">{Object.values(selectedGas()).filter(Boolean).length}</span> de <span class="font-bold text-slate-700">{filteredGas().length}</span>
+              </span>
+              <div class="flex gap-2">
+                <button
+                  onClick={() => setParsedProject(null)}
+                  class="px-4 py-2 rounded-xl text-xs font-semibold text-slate-500 hover:bg-slate-100 transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleImport}
+                  class="px-4 py-2 rounded-xl text-xs font-semibold bg-(--blue-600) hover:bg-(--blue-700) text-white shadow-md shadow-(--blue-600)/20 transition-all"
+                >
+                  Importar y Suscribirse
+                </button>
+              </div>
+            </footer>
+          </div>
+        </div>
+      </Show>
+
+      {/* Delete All Modal */}
+      <Show when={showDeleteAllModal()}>
+        <div class="fixed inset-0 bg-slate-900/50 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div class="bg-white rounded-3xl shadow-xl border border-slate-100 max-w-sm w-full p-6 text-center animate-scale-in">
+            <div class="w-16 h-16 bg-rose-100 text-rose-600 rounded-full flex items-center justify-center mx-auto mb-4 text-3xl">
+              ⚠️
+            </div>
+            <h3 class="font-bold text-lg text-slate-800 mb-2">
+              ¿Eliminar TODAS las suscripciones?
+            </h3>
+            <p class="text-sm text-slate-500 mb-6 leading-relaxed">
+              Esta acción eliminará de forma permanente las <b class="text-rose-600">{subscriptions().length}</b> direcciones de grupo de tu base de datos y de la memoria. Esta acción no se puede deshacer.
+            </p>
+            
+            <div class="flex gap-3 w-full">
+              <button
+                onClick={() => setShowDeleteAllModal(false)}
+                class="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={executeDeleteAll}
+                disabled={deleteAllCountdown() > 0}
+                class="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold text-white transition-all shadow-md flex items-center justify-center gap-2"
+                style={{
+                  "background-color": deleteAllCountdown() > 0 ? "#cbd5e1" : "#e11d48",
+                  "cursor": deleteAllCountdown() > 0 ? "not-allowed" : "pointer",
+                }}
+              >
+                {deleteAllCountdown() > 0 ? `Esperar (${deleteAllCountdown()}s)` : "Sí, eliminar"}
+              </button>
+            </div>
+          </div>
+        </div>
+      </Show>
     </div>
   );
 };

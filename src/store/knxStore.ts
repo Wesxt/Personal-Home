@@ -28,6 +28,11 @@ export const [discoveredDevices, setDiscoveredDevices] = createSignal<any[]>([])
 export const [groupValues, setGroupValues] = createStore<Record<string, any>>({});
 export const [groupCemis, setGroupCemis] = createStore<Record<string, any>>({});
 
+export const [parsingProject, setParsingProject] = createSignal(false);
+export const [parsedProject, setParsedProject] = createSignal<any>(null);
+export const [groupNames, setGroupNames] = createStore<Record<string, string>>({});
+export const [groupDescriptions, setGroupDescriptions] = createStore<Record<string, string>>({});
+
 export interface KnxAlert {
   id: string;
   type: "error" | "warning" | "info" | "success";
@@ -133,6 +138,8 @@ const handleWSMessage = (payload: any) => {
       setSubscriptions(loadedAddrs);
       dbSubs.forEach((s: any) => {
         if (s.dpt) setDpts(s.address, s.dpt);
+        if (s.name) setGroupNames(s.address, s.name);
+        if (s.description) setGroupDescriptions(s.address, s.description);
         if (s.lastValue !== undefined && s.lastValue !== null) {
           setGroupValues(s.address, s.lastValue);
         }
@@ -143,6 +150,17 @@ const handleWSMessage = (payload: any) => {
         data: `Cargadas ${dbSubs.length} suscripciones desde el backend SQLite`,
         time,
       });
+      break;
+    case "parse_knxproj_result":
+      setParsingProject(false);
+      if (payload.success) {
+        setParsedProject(payload.data);
+        addLog({ dir: "IN", action: "parse_knxproj_result", data: "Project parsed successfully", time });
+      } else {
+        setParsedProject(null);
+        addLog({ dir: "IN", action: "parse_knxproj_result", error: payload.error || "Unknown parsing error", time });
+        addAlert("error", payload.error || "Error al parsear el proyecto KNX.");
+      }
       break;
     case "knx_connection_status":
       setKnxStatus({
@@ -246,8 +264,13 @@ export const readKnx = (ga: string) => {
   sendWSMessage({ action: "read", groupAddress: ga });
 };
 
-export const subscribeKnx = (ga: string) => {
-  sendWSMessage({ action: "subscribe", groupAddress: ga });
+export const subscribeKnx = (ga: string, name?: string) => {
+  if (name) {
+    setGroupNames(ga, name); // Optimistically update store
+    sendWSMessage({ action: "subscribe", groupAddress: ga, name });
+  } else {
+    sendWSMessage({ action: "subscribe", groupAddress: ga });
+  }
 };
 
 export const unsubscribeKnx = (ga: string) => {
@@ -262,4 +285,14 @@ export const discoverKnx = (ipLocal?: string) => {
   const payload: any = { action: "discover" };
   if (ipLocal) payload.ipLocal = ipLocal;
   sendWSMessage(payload);
+};
+
+export const parseKnxProj = (fileContentBase64: string, password?: string) => {
+  setParsingProject(true);
+  setParsedProject(null);
+  sendWSMessage({ action: "parse_knxproj", fileContent: fileContentBase64, password });
+};
+
+export const importGroupAddresses = (addresses: Array<{ address: string; dpt?: string | null; name?: string | null; description?: string | null }>) => {
+  sendWSMessage({ action: "import_group_addresses", groupAddresses: addresses });
 };
